@@ -20,7 +20,7 @@ module ParallelServer
     #   @option opts [#call] :on_child_start (nil) object#call() is invoked when child process start. This is called in child process.
     #   @option opts [#call] :on_child_exit (nil) object#call(pid, status) is invoked when child process stop. This is call in parent process.
     #   @option opts [Integer] :standby_threads (5) keep free processes or threads
-    #   @option opts [Integer] :back_log (same as standby_threads) listen back log
+    #   @option opts [Integer] :listen_backlog (nil) listen backlog
 
     # @overload initialize(host=nil, port, opts={})
     #   @!macro args
@@ -33,7 +33,7 @@ module ParallelServer
       @on_child_start = opts[:on_child_start]
       @on_child_exit = opts[:on_child_exit]
       @standby_threads = opts[:standby_threads] || DEFAULT_STANDBY_THREADS
-      @back_log = opts[:back_log] || @standby_threads
+      @listen_backlog = opts[:listen_backlog]
       @from_child = {}             # IO => pid
       @to_child = {}               # pid => IO
       @child_status = {}           # pid => Hash
@@ -49,7 +49,7 @@ module ParallelServer
       @block = block
       @loop = true
       @sockets = Socket.tcp_server_sockets(@host, @port)
-      @sockets.each{|s| s.listen(@back_log)}
+      @sockets.each{|s| s.listen(@listen_backlog)} if @listen_backlog
       @reload_args = nil
       while @loop
         do_reload if @reload_args
@@ -80,14 +80,14 @@ module ParallelServer
       @on_child_start = @opts[:on_child_start]
       @on_child_exit = @opts[:on_child_exit]
       @standby_threads = @opts[:standby_threads] || DEFAULT_STANDBY_THREADS
-      @back_log = @opts[:back_log] || @standby_threads
+      @listen_backlog = @opts[:listen_backlog]
 
       data = {}
       if @host != host || @port != port
         @host, @port = host, port
         @sockets.each(&:close)
         @sockets = Socket.tcp_server_sockets(@host, @port)
-        @sockets.each{|s| s.listen(@back_log)}
+        @sockets.each{|s| s.listen(@listen_backlog)} if @listen_backlog
         data[:address_changed] = true
       end
       data[:opts] = @opts.select{|_, value| Marshal.dump(value) rescue nil}
