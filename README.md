@@ -59,8 +59,11 @@ ParallelServer::Prefork の動作を設定するパラメータ。
 生成後一度も接続されていないプロセスはこのパラメータの影響を受けません。
 max_idle 経過後でもクライアントと接続中であればプロセスは終了しません。ただし `:min_processes`, `:max_processes` のカウント対象外です。
 
-`:on_child_start` :
+`:on_start` :
 子プロセス起動時に*子プロセス側*で実行される処理を Proc で指定します。Proc 実行時の引数はありません。
+
+`:on_child_start` :
+子プロセス起動時に*親プロセス側*で実行される処理を Proc で指定します。Proc 実行時の引数はプロセスID(Integer)です。
 
 `:on_child_exit` :
 子プロセス終了時に*親プロセス側*で実行される処理を Proc で指定します。Proc 実行時の引数はプロセスID(Integer)と終了ステータス(Process::Status)です。

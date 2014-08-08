@@ -17,10 +17,11 @@ module ParallelServer
     #   @option opts [Integer] :max_processes (20) maximum processes
     #   @option opts [Integer] :max_idle (10) cihld process exits if max_idle seconds is expired
     #   @option opts [Integer] :max_threads (1) maximum threads per process
-    #   @option opts [#call] :on_child_start (nil) object#call() is invoked when child process start. This is called in child process.
-    #   @option opts [#call] :on_child_exit (nil) object#call(pid, status) is invoked when child process stop. This is call in parent process.
     #   @option opts [Integer] :standby_threads (5) keep free processes or threads
     #   @option opts [Integer] :listen_backlog (nil) listen backlog
+    #   @option opts [#call] :on_start (nil) object#call() is invoked when child process start. This is called in child process.
+    #   @option opts [#call] :on_child_start (nil) object#call(pid) is invoked when child process exit. This is call in parent process.
+    #   @option opts [#call] :on_child_exit (nil) object#call(pid, status) is invoked when child process exit. This is call in parent process.
 
     # @overload initialize(host=nil, port, opts={})
     #   @!macro args
@@ -30,10 +31,11 @@ module ParallelServer
       @min_processes = opts[:min_processes] || DEFAULT_MIN_PROCESSES
       @max_processes = opts[:max_processes] || DEFAULT_MAX_PROCESSES
       @max_threads = opts[:max_threads] || DEFAULT_MAX_THREADS
-      @on_child_start = opts[:on_child_start]
-      @on_child_exit = opts[:on_child_exit]
       @standby_threads = opts[:standby_threads] || DEFAULT_STANDBY_THREADS
       @listen_backlog = opts[:listen_backlog]
+      @on_start = opts[:on_start]
+      @on_child_start = opts[:on_child_start]
+      @on_child_exit = opts[:on_child_exit]
       @from_child = {}             # IO => pid
       @to_child = {}               # pid => IO
       @child_status = {}           # pid => Hash
@@ -77,10 +79,11 @@ module ParallelServer
       @min_processes = @opts[:min_processes] || DEFAULT_MIN_PROCESSES
       @max_processes = @opts[:max_processes] || DEFAULT_MAX_PROCESSES
       @max_threads = @opts[:max_threads] || DEFAULT_MAX_THREADS
-      @on_child_start = @opts[:on_child_start]
-      @on_child_exit = @opts[:on_child_exit]
       @standby_threads = @opts[:standby_threads] || DEFAULT_STANDBY_THREADS
       @listen_backlog = @opts[:listen_backlog]
+      @on_start = @opts[:on_start]
+      @on_child_start = @opts[:on_child_start]
+      @on_child_exit = @opts[:on_child_exit]
 
       data = {}
       if @host != host || @port != port
@@ -222,7 +225,7 @@ module ParallelServer
         @to_child.values.each(&:close)
         from_child[0].close
         to_child[1].close
-        @on_child_start.call if @on_child_start
+        @on_start.call if @on_start
         Child.new(@sockets, @opts, from_child[1], to_child[0]).start(@block)
       end
       from_child[1].close
@@ -231,6 +234,7 @@ module ParallelServer
       @to_child[pid] = to_child[1]
       @children.push pid
       @child_status[pid] = {capacity: @max_threads, running: 0}
+      @on_child_start.call(pid) if @on_child_start
     end
 
     class Child
