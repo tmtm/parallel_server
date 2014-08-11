@@ -70,10 +70,10 @@ max_idle 経過後でもクライアントと接続中であればプロセス�
 
 ### #start
 
-* `start{|sock, addr| ...}`
+* `start{|sock, addr, child| ...}`
 
 待ち受けを開始します。クライアントから接続する毎にスレッドを生成して、ブロックを実行します。
-ブロックパラメータは Socket と Addrinfo です。
+ブロックパラメータは Socket と Addrinfo と ParallelServer::Prefork::Child です。
 
 ### #reload
 

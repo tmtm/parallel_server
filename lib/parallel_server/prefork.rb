@@ -9,6 +9,8 @@ module ParallelServer
     DEFAULT_STANDBY_THREADS = 5
     DEFAULT_MAX_IDLE = 10
 
+    attr_reader :child_status
+
     # @!macro [new] args
     #   @param host [String] hostname or IP address
     #   @param port [Integer / String] port number / service name
@@ -28,14 +30,14 @@ module ParallelServer
     def initialize(*args)
       host, port, opts = parse_args(*args)
       @host, @port, @opts = host, port, opts
-      @min_processes = opts[:min_processes] || DEFAULT_MIN_PROCESSES
-      @max_processes = opts[:max_processes] || DEFAULT_MAX_PROCESSES
-      @max_threads = opts[:max_threads] || DEFAULT_MAX_THREADS
-      @standby_threads = opts[:standby_threads] || DEFAULT_STANDBY_THREADS
-      @listen_backlog = opts[:listen_backlog]
-      @on_start = opts[:on_start]
-      @on_child_start = opts[:on_child_start]
-      @on_child_exit = opts[:on_child_exit]
+      @min_processes = @opts[:min_processes] || DEFAULT_MIN_PROCESSES
+      @max_processes = @opts[:max_processes] || DEFAULT_MAX_PROCESSES
+      @max_threads = @opts[:max_threads] || DEFAULT_MAX_THREADS
+      @standby_threads = @opts[:standby_threads] || DEFAULT_STANDBY_THREADS
+      @listen_backlog = @opts[:listen_backlog]
+      @on_start = @opts[:on_start]
+      @on_child_start = @opts[:on_child_start]
+      @on_child_exit = @opts[:on_child_exit]
       @from_child = {}             # IO => pid
       @to_child = {}               # pid => IO
       @child_status = {}           # pid => Hash
@@ -43,9 +45,10 @@ module ParallelServer
     end
 
     # @return [void]
-    # @yield [sock, addr]
+    # @yield [sock, addr, child]
     # @yieldparam sock [Socket]
     # @yieldparam addr [Addrinfo]
+    # @yieldparam child [ParallelServer::Prefork::Child]
     def start(&block)
       raise 'block required' unless block
       @block = block
@@ -85,15 +88,24 @@ module ParallelServer
       @on_child_start = @opts[:on_child_start]
       @on_child_exit = @opts[:on_child_exit]
 
-      data = {}
+      address_changed = false
       if @host != host || @port != port
         @host, @port = host, port
         @sockets.each(&:close)
         @sockets = Socket.tcp_server_sockets(@host, @port)
         @sockets.each{|s| s.listen(@listen_backlog)} if @listen_backlog
-        data[:address_changed] = true
+        address_changed = true
       end
-      data[:opts] = @opts.select{|_, value| Marshal.dump(value) rescue nil}
+
+      reload_children(address_changed)
+    end
+
+    # @param address_changed [true/false]
+    # @return [void]
+    def reload_children(address_changed=false)
+      data = {}
+      data[:address_changed] = address_changed
+      data[:options] = @opts.select{|_, value| Marshal.dump(value) rescue nil}
       data = Marshal.dump(data)
       @to_child.values.each do |pipe|
         talk_to_child pipe, data
@@ -148,9 +160,14 @@ module ParallelServer
         readable.each do |from_child|
           pid = @from_child[from_child]
           if st = read_child_status(from_child)
-            @child_status[pid] = st
+            @child_status[pid].update st
+            if st[:status] == :stop
+              @to_child[pid].close rescue nil
+              @to_child.delete pid
+            end
           else
             @from_child.delete from_child
+            @to_child[pid].close rescue nil
             @to_child.delete pid
             @child_status.delete pid
             from_child.close
@@ -190,14 +207,14 @@ module ParallelServer
     # @return [Array<Integer, Integer>]
     def current_capacity_and_connections
       values = @child_status.values
-      capa = values.map{|st| st[:capacity]}.reduce(&:+).to_i
-      conn = values.map{|st| st[:running]}.reduce(&:+).to_i
+      capa = values.count{|st| st[:status] == :run} * @max_threads
+      conn = values.map{|st| st[:connections].count}.reduce(&:+).to_i
       return [capa, conn]
     end
 
     # @return [Integer]
     def available_children
-      @child_status.values.select{|st| st[:capacity] > 0}.size
+      @child_status.values.count{|st| st[:status] == :run}
     end
 
     # @return [void]
@@ -233,34 +250,38 @@ module ParallelServer
       @from_child[from_child[0]] = pid
       @to_child[pid] = to_child[1]
       @children.push pid
-      @child_status[pid] = {capacity: @max_threads, running: 0}
+      @child_status[pid] = {status: :run, connections: {}}
       @on_child_start.call(pid) if @on_child_start
     end
 
     class Child
+
+      attr_reader :options
+
       # @param sockets [Array<Socket>]
       # @param opts [Hash]
       # @param to_parent [IO]
       # @param from_parent [IO]
       def initialize(sockets, opts, to_parent, from_parent)
         @sockets = sockets
-        @opts = opts
+        @options = opts
         @to_parent = to_parent
         @from_parent = from_parent
         @threads = {}
         @threads_mutex = Mutex.new
         @threads_cv = ConditionVariable.new
+        @parent_mutex = Mutex.new
         @status = :run
       end
 
       # @return [Integer]
       def max_threads
-        @opts[:max_threads] || DEFAULT_MAX_THREADS
+        @options[:max_threads] || DEFAULT_MAX_THREADS
       end
 
       # @return [Integer]
       def max_idle
-        @opts[:max_idle] || DEFAULT_MAX_IDLE
+        @options[:max_idle] || DEFAULT_MAX_IDLE
       end
 
       # @param block [#call]
@@ -273,11 +294,12 @@ module ParallelServer
           break unless sock
           first = false
           thr = Thread.new(sock, addr){|s, a| run(s, a, block)}
-          connected(thr)
+          connected(thr, addr)
         end
+        @status = :stop
         @sockets.each(&:close)
         @threads_mutex.synchronize do
-          notice_status
+          notify_status
         end
         wait_all_connections
       end
@@ -298,7 +320,7 @@ module ParallelServer
         raise unless data.size == len
         data = Marshal.load(data)
         raise if data[:address_changed]
-        @opts.update data[:opts]
+        @options.update data[:options]
       rescue
         @status = :stop
       end
@@ -313,11 +335,12 @@ module ParallelServer
       end
 
       # @param thread [Thread]
+      # @param addr [Addrinfo]
       # @return [void]
-      def connected(thread)
+      def connected(thread, addr)
         @threads_mutex.synchronize do
-          @threads[thread] = true
-          notice_status
+          @threads[thread] = addr
+          notify_status
         end
       end
 
@@ -325,16 +348,17 @@ module ParallelServer
       def disconnect
         @threads_mutex.synchronize do
           @threads.delete Thread.current
-          notice_status
+          notify_status
           @threads_cv.signal
         end
       end
 
       # @return [void]
-      def notice_status
+      def notify_status
+        connections = Hash[@threads.map{|thr, adr| [thr.object_id, adr]}]
         status = {
-          running: @threads.size,
-          capacity: @status == :run ? max_threads : 0,
+          status: @status,
+          connections: connections,
         }
         data = Marshal.dump(status)
         @to_parent.puts data.length
@@ -348,7 +372,7 @@ module ParallelServer
       # @param block [#call]
       # @return [void]
       def run(sock, addr, block)
-        block.call(sock, addr)
+        block.call(sock, addr, self)
       rescue Exception => e
         STDERR.puts e.inspect, e.backtrace.inspect
       ensure
