@@ -42,6 +42,7 @@ module ParallelServer
       @to_child = {}               # pid => IO
       @child_status = {}           # pid => Hash
       @children = []               # pid
+      @thread_to_child = {}        # pid => Thread
     end
 
     # @return [void]
@@ -64,6 +65,8 @@ module ParallelServer
       @sockets.each(&:close)
       @to_child.values.each(&:close)
       @to_child.clear
+      @thread_to_child.values.each(&:exit)
+      @thread_to_child.clear
       Thread.new{wait_all_children}
     end
 
@@ -107,19 +110,31 @@ module ParallelServer
       data[:address_changed] = address_changed
       data[:options] = @opts.select{|_, value| Marshal.dump(value) rescue nil}
       data = Marshal.dump(data)
-      @to_child.values.each do |pipe|
-        talk_to_child pipe, data
+      talk_to_children data
+    end
+
+    # @param data [String]
+    # @return [void]
+    def talk_to_children(data)
+      @data_to_child = data
+      @thread_to_child.values.each do |thr|
+        begin
+          thr.run
+        rescue ThreadError
+          # try to run dead thread. ignore it.
+        end
       end
     end
 
     # @param io [IO]
-    # @param data [String]
     # @return [void]
-    def talk_to_child(io, data)
-      io.puts data.length
-      io.write data
-    rescue Errno::EPIPE
-      # ignore
+    def talk_to_child_loop(io)
+      while true
+        Thread.stop
+        data = @data_to_child
+        io.puts data.length
+        io.write data
+      end
     end
 
     # @return [void]
@@ -164,11 +179,15 @@ module ParallelServer
             if st[:status] == :stop
               @to_child[pid].close rescue nil
               @to_child.delete pid
+              @thread_to_child[pid].exit rescue nil
+              @thread_to_child.delete pid
             end
           else
             @from_child.delete from_child
             @to_child[pid].close rescue nil
             @to_child.delete pid
+            @thread_to_child[pid].exit rescue nil
+            @thread_to_child.delete pid
             @child_status.delete pid
             from_child.close
           end
@@ -249,6 +268,7 @@ module ParallelServer
       to_child[0].close
       @from_child[from_child[0]] = pid
       @to_child[pid] = to_child[1]
+      @thread_to_child[pid] = Thread.new(to_child[1]){|io| talk_to_child_loop(io)}
       @children.push pid
       @child_status[pid] = {status: :run, connections: {}}
       @on_child_start.call(pid) if @on_child_start
@@ -293,8 +313,7 @@ module ParallelServer
           sock, addr = accept(first)
           break unless sock
           first = false
-          thr = Thread.new(sock, addr){|s, a| run(s, a, block)}
-          connected(thr, addr)
+          Thread.new(sock, addr){|s, a| run(s, a, block)}
         end
         @status = :stop
         @sockets.each(&:close)
@@ -334,12 +353,11 @@ module ParallelServer
         end
       end
 
-      # @param thread [Thread]
       # @param addr [Addrinfo]
       # @return [void]
-      def connected(thread, addr)
+      def connected(addr)
         @threads_mutex.synchronize do
-          @threads[thread] = addr
+          @threads[Thread.current] = addr
           notify_status
         end
       end
@@ -372,6 +390,7 @@ module ParallelServer
       # @param block [#call]
       # @return [void]
       def run(sock, addr, block)
+        connected(addr)
         block.call(sock, addr, self)
       rescue Exception => e
         STDERR.puts e.inspect, e.backtrace.inspect
