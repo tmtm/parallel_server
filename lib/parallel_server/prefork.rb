@@ -60,7 +60,7 @@ module ParallelServer
       @to_child.clear
       @thread_to_child.values.each(&:exit)
       @thread_to_child.clear
-      Thread.new{wait_all_children}
+      Timeout.timeout(1){wait_all_children} rescue Thread.new{wait_all_children}
     end
 
     # @overload reload(host=nil, port, opts={})
