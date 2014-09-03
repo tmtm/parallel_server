@@ -36,6 +36,7 @@ module ParallelServer
       @child_status = {}           # pid => Hash
       @children = []               # pid
       @thread_to_child = {}        # pid => Thread
+      @loop = true
     end
 
     # @return [void]
@@ -46,7 +47,6 @@ module ParallelServer
     def start(&block)
       raise 'block required' unless block
       @block = block
-      @loop = true
       @sockets = Socket.tcp_server_sockets(@host, @port)
       @sockets.each{|s| s.listen(@listen_backlog)} if @listen_backlog
       @reload_args = nil
