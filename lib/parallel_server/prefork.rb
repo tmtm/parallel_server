@@ -313,7 +313,10 @@ module ParallelServer
           sock, addr = accept(first)
           break unless sock
           first = false
-          Thread.new(sock, addr){|s, a| run(s, a, block)}
+          thr = Thread.new(sock, addr){|s, a| run(s, a, block)}
+          @threads_mutex.synchronize do
+            @threads[thr] = addr
+          end
         end
         @status = :stop
         @sockets.each(&:close)
