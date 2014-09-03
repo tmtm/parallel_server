@@ -30,14 +30,7 @@ module ParallelServer
     def initialize(*args)
       host, port, opts = parse_args(*args)
       @host, @port, @opts = host, port, opts
-      @min_processes = @opts[:min_processes] || DEFAULT_MIN_PROCESSES
-      @max_processes = @opts[:max_processes] || DEFAULT_MAX_PROCESSES
-      @max_threads = @opts[:max_threads] || DEFAULT_MAX_THREADS
-      @standby_threads = @opts[:standby_threads] || DEFAULT_STANDBY_THREADS
-      @listen_backlog = @opts[:listen_backlog]
-      @on_start = @opts[:on_start]
-      @on_child_start = @opts[:on_child_start]
-      @on_child_exit = @opts[:on_child_exit]
+      set_variables_from_opts
       @from_child = {}             # IO => pid
       @to_child = {}               # pid => IO
       @child_status = {}           # pid => Hash
@@ -81,15 +74,7 @@ module ParallelServer
     def do_reload
       host, port, @opts = @reload_args
       @reload_args = nil
-
-      @min_processes = @opts[:min_processes] || DEFAULT_MIN_PROCESSES
-      @max_processes = @opts[:max_processes] || DEFAULT_MAX_PROCESSES
-      @max_threads = @opts[:max_threads] || DEFAULT_MAX_THREADS
-      @standby_threads = @opts[:standby_threads] || DEFAULT_STANDBY_THREADS
-      @listen_backlog = @opts[:listen_backlog]
-      @on_start = @opts[:on_start]
-      @on_child_start = @opts[:on_child_start]
-      @on_child_exit = @opts[:on_child_exit]
+      set_variables_from_opts
 
       address_changed = false
       if @host != host || @port != port
@@ -272,6 +257,19 @@ module ParallelServer
       @children.push pid
       @child_status[pid] = {status: :run, connections: {}}
       @on_child_start.call(pid) if @on_child_start
+    end
+
+    private
+
+    def set_variables_from_opts
+      @min_processes = @opts[:min_processes] || DEFAULT_MIN_PROCESSES
+      @max_processes = @opts[:max_processes] || DEFAULT_MAX_PROCESSES
+      @max_threads = @opts[:max_threads] || DEFAULT_MAX_THREADS
+      @standby_threads = @opts[:standby_threads] || DEFAULT_STANDBY_THREADS
+      @listen_backlog = @opts[:listen_backlog]
+      @on_start = @opts[:on_start]
+      @on_child_start = @opts[:on_child_start]
+      @on_child_exit = @opts[:on_child_exit]
     end
 
     class Child
