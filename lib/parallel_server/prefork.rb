@@ -94,14 +94,13 @@ module ParallelServer
       data = {}
       data[:address_changed] = address_changed
       data[:options] = @opts.select{|_, value| Marshal.dump(value) rescue nil}
-      data = Marshal.dump(data)
       talk_to_children data
     end
 
     # @param data [String]
     # @return [void]
     def talk_to_children(data)
-      @data_to_child = data
+      @data_to_child = Marshal.dump(data)
       @thread_to_child.values.each do |thr|
         begin
           thr.run
@@ -116,9 +115,7 @@ module ParallelServer
     def talk_to_child_loop(io)
       while true
         Thread.stop
-        data = @data_to_child
-        io.puts data.length
-        io.write data
+        Conversation._send(io, @data_to_child)
       end
     end
 
@@ -159,7 +156,7 @@ module ParallelServer
       if readable
         readable.each do |from_child|
           pid = @from_child[from_child]
-          if st = read_child_status(from_child)
+          if st = Conversation.recv(from_child)
             @child_status[pid].update st
             if st[:status] == :stop
               @to_child[pid].close rescue nil
@@ -181,17 +178,6 @@ module ParallelServer
       if @children.size != @child_status.size
         wait_children
       end
-    end
-
-    # @param io [IO]
-    # @return [Hash]
-    def read_child_status(io)
-      len = io.gets
-      return unless len && len =~ /\A\d+\n/
-      len = len.to_i
-      data = io.read(len)
-      return unless data.size == len
-      Marshal.load(data)
     end
 
     # @return [void]
@@ -333,12 +319,7 @@ module ParallelServer
 
       # @return [void]
       def reload
-        len = @from_parent.gets
-        raise unless len && len =~ /\A\d+\n/
-        len = len.to_i
-        data = @from_parent.read(len)
-        raise unless data.size == len
-        data = Marshal.load(data)
+        data = Conversation.recv(@from_parent)
         raise if data[:address_changed]
         @options.update data[:options]
       rescue
@@ -379,9 +360,7 @@ module ParallelServer
           status: @status,
           connections: connections,
         }
-        data = Marshal.dump(status)
-        @to_parent.puts data.length
-        @to_parent.write data
+        Conversation.send(@to_parent, status)
       rescue Errno::EPIPE
         # ignore
       end
@@ -421,6 +400,34 @@ module ParallelServer
             next
           end
         end
+      end
+    end
+
+    class Conversation
+      # @param io [IO]
+      # @param msg [Object]
+      # @return [void]
+      def self.send(io, msg)
+        _send(io, Marshal.dump(msg))
+      end
+
+      # @param io [IO]
+      # @param data [String] marshaled data
+      # @return [void]
+      def self._send(io, data)
+        io.puts data.length
+        io.write data
+      end
+
+      # @param io [IO]
+      # @return [Object]
+      def self.recv(io)
+        len = io.gets
+        return unless len && len =~ /\A\d+\n/
+        len = len.to_i
+        data = io.read(len)
+        return unless data.size == len
+        Marshal.load(data)
       end
     end
   end
