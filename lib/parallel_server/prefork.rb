@@ -297,6 +297,7 @@ module ParallelServer
       # @param block [#call]
       # @return [void]
       def start(block)
+        start_reload_thread
         first = true
         while @status == :run
           wait_thread
@@ -317,17 +318,28 @@ module ParallelServer
       end
 
       # @return [void]
+      def start_reload_thread
+        Thread.new do
+          until @status == :exit
+            reload
+          end
+        end
+      end
+
+      # @return [void]
       def wait_all_connections
         @threads.keys.each do |thr|
           thr.join rescue nil
         end
+        @status = :exit
       end
 
       # @return [void]
       def reload
         data = Conversation.recv(@from_parent)
-        raise if data[:address_changed]
         @options.update data[:options]
+        @threads_cv.signal
+        raise if data[:address_changed]
       rescue
         @status = :stop
       end
@@ -391,14 +403,9 @@ module ParallelServer
       def accept(first=nil)
         while true
           timer = first ? nil : max_idle
-          readable, = IO.select(@sockets+[@from_parent], nil, nil, timer)
+          readable, = IO.select(@sockets, nil, nil, timer)
           return nil unless readable
           r, = readable
-          if r == @from_parent
-            reload
-            next if @status == :run
-            return nil
-          end
           begin
             sock, addr = r.accept_nonblock
             return [sock, addr]
