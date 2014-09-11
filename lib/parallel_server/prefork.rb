@@ -55,8 +55,9 @@ module ParallelServer
         watch_children
         adjust_children
       end
-      @sockets.each(&:close)
-      @to_child.values.each(&:close)
+    ensure
+      @sockets.each{|s| s.close rescue nil} if @sockets
+      @to_child.values.each{|s| s.close rescue nil}
       @to_child.clear
       @thread_to_child.values.each(&:exit)
       @thread_to_child.clear
@@ -116,9 +117,11 @@ module ParallelServer
     # @param io [IO]
     # @return [void]
     def talk_to_child_loop(io)
+      data = nil
       while true
-        Thread.stop
-        Conversation._send(io, @data_to_child)
+        Thread.stop if data.nil? || data == @data_to_child
+        data = @data_to_child
+        Conversation._send(io, data)
       end
     end
 
@@ -429,7 +432,7 @@ module ParallelServer
         return unless len && len =~ /\A\d+\n/
         len = len.to_i
         data = io.read(len)
-        return unless data.size == len
+        return unless data && data.size == len
         Marshal.load(data)
       end
     end
