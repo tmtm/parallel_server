@@ -297,10 +297,30 @@ module ParallelServer
       # @param block [#call]
       # @return [void]
       def start(block)
+        cur_thread = Thread.current
+        accept_thread = Thread.new{ accept_loop(block); cur_thread.run}
+        reload_thread = Thread.new{ reload_loop; cur_thread.run }
+
+        Thread.stop
+        @status = :stop
+
+        accept_thread.exit
+        @sockets.each(&:close)
+        @threads_mutex.synchronize do
+          notify_status
+        end
+        wait_all_connections
+        reload_thread.exit
+      end
+
+      # @param block [#call]
+      # @return [void]
+      def accept_loop(block)
         first = true
         while @status == :run
           wait_thread
-          sock, addr = accept(first)
+          sock, addr = accept
+          next if sock.nil? && first
           break unless sock
           first = false
           thr = Thread.new(sock, addr){|s, a| run(s, a, block)}
@@ -308,12 +328,6 @@ module ParallelServer
             @threads[thr] = addr
           end
         end
-        @status = :stop
-        @sockets.each(&:close)
-        @threads_mutex.synchronize do
-          notify_status
-        end
-        wait_all_connections
       end
 
       # @return [void]
@@ -321,15 +335,20 @@ module ParallelServer
         @threads.keys.each do |thr|
           thr.join rescue nil
         end
+        @status = :exit
       end
 
       # @return [void]
-      def reload
-        data = Conversation.recv(@from_parent)
-        raise if data[:address_changed]
-        @options.update data[:options]
-      rescue
-        @status = :stop
+      def reload_loop
+        while true
+          data = Conversation.recv(@from_parent)
+          break unless data
+          @options.update data[:options]
+          @status = :stop if data[:address_changed]
+          @threads_cv.signal
+        end
+        @from_parent.close
+        @from_parent = nil
       end
 
       # @return [void]
@@ -385,20 +404,13 @@ module ParallelServer
         disconnect
       end
 
-      # @param first [Boolean]
       # @return [Array<Socket, AddrInfo>]
       # @return [nil]
-      def accept(first=nil)
+      def accept
         while true
-          timer = first ? nil : max_idle
-          readable, = IO.select(@sockets+[@from_parent], nil, nil, timer)
+          readable, = IO.select(@sockets, nil, nil, max_idle)
           return nil unless readable
           r, = readable
-          if r == @from_parent
-            reload
-            next if @status == :run
-            return nil
-          end
           begin
             sock, addr = r.accept_nonblock
             return [sock, addr]
