@@ -74,6 +74,7 @@ module ParallelServer
     def do_reload
       host, port, @opts = @reload_args
       @reload_args = nil
+      old_listen_backlog = @listen_backlog
       set_variables_from_opts
 
       address_changed = false
@@ -83,6 +84,8 @@ module ParallelServer
         @sockets = Socket.tcp_server_sockets(@host, @port)
         @sockets.each{|s| s.listen(@listen_backlog)} if @listen_backlog
         address_changed = true
+      elsif @listen_backlog != old_listen_backlog
+        @sockets.each{|s| s.listen(@listen_backlog)} if @listen_backlog
       end
 
       reload_children(address_changed)
