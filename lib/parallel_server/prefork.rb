@@ -57,7 +57,7 @@ module ParallelServer
         adjust_children
       end
     ensure
-      @sockets.each{|s| s.close rescue nil}
+      @sockets.each{|s| s.close rescue nil} if @sockets
       @to_child.values.each{|s| s.close rescue nil}
       @to_child.clear
       @thread_to_child.values.each(&:exit)
@@ -261,7 +261,6 @@ module ParallelServer
       @standby_threads = @opts[:standby_threads] || DEFAULT_STANDBY_THREADS
       @listen_backlog = @opts[:listen_backlog]
       @on_start = @opts[:on_start]
-      @on_reload = @opts[:on_reload]
       @on_child_start = @opts[:on_child_start]
       @on_child_exit = @opts[:on_child_exit]
     end
@@ -340,7 +339,7 @@ module ParallelServer
       def reload
         data = Conversation.recv(@from_parent)
         @options.update data[:options]
-        @options[:on_reload].call if @options[:on_reload]
+        @options[:on_reload].call @options if @options[:on_reload]
         @threads_cv.signal
         raise if data[:address_changed]
       rescue
