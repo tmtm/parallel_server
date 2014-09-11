@@ -22,6 +22,7 @@ module ParallelServer
     #   @option opts [Integer] :standby_threads (5) keep free processes or threads
     #   @option opts [Integer] :listen_backlog (nil) listen backlog
     #   @option opts [#call] :on_start (nil) object#call() is invoked when child process start. This is called in child process.
+    #   @option opts [#call] :on_reload (nil) object#call(hash) is invoked when reload. This is called in child process.
     #   @option opts [#call] :on_child_start (nil) object#call(pid) is invoked when child process exit. This is call in parent process.
     #   @option opts [#call] :on_child_exit (nil) object#call(pid, status) is invoked when child process exit. This is call in parent process.
 
@@ -344,6 +345,7 @@ module ParallelServer
           data = Conversation.recv(@from_parent)
           break unless data
           @options.update data[:options]
+          @options[:on_reload].call @options if @options[:on_reload]
           @status = :stop if data[:address_changed]
           @threads_cv.signal
         end
