@@ -8,6 +8,7 @@ module ParallelServer
     DEFAULT_MAX_THREADS = 1
     DEFAULT_STANDBY_THREADS = 5
     DEFAULT_MAX_IDLE = 10
+    DEFAULT_MAX_USE = 1000
 
     attr_reader :child_status
 
@@ -18,6 +19,7 @@ module ParallelServer
     #   @option opts [Integer] :min_processes (5) minimum processes
     #   @option opts [Integer] :max_processes (20) maximum processes
     #   @option opts [Integer] :max_idle (10) cihld process exits if max_idle seconds is expired
+    #   @option opts [Integer] :max_use (1000) child process exits if it is connected max_use times.
     #   @option opts [Integer] :max_threads (1) maximum threads per process
     #   @option opts [Integer] :standby_threads (5) keep free processes or threads
     #   @option opts [Integer] :listen_backlog (nil) listen backlog
@@ -295,6 +297,11 @@ module ParallelServer
         @options[:max_idle] || DEFAULT_MAX_IDLE
       end
 
+      # @return [Integer]
+      def max_use
+        @options[:max_use] || DEFAULT_MAX_USE
+      end
+
       # @param block [#call]
       # @return [void]
       def start(block)
@@ -320,17 +327,18 @@ module ParallelServer
       # @param main_thread [Thread]
       # @return [void]
       def accept_loop(block, main_thread)
-        first = true
+        count = 0
         while @status == :run
           wait_thread
           sock, addr = accept
-          next if sock.nil? && first
+          next if sock.nil? && count == 0
           break unless sock
-          first = false
           thr = Thread.new(sock, addr){|s, a| run(s, a, block)}
           @threads_mutex.synchronize do
             @threads[thr] = addr
           end
+          count += 1
+          break if count >= max_use
         end
       ensure
         @status = :stop
