@@ -298,12 +298,12 @@ module ParallelServer
       # @param block [#call]
       # @return [void]
       def start(block)
-        cur_thread = Thread.current
-        accept_thread = Thread.new{ accept_loop(block); cur_thread.run}
-        reload_thread = Thread.new{ reload_loop; cur_thread.run }
+        main_thread = Thread.current
+        accept_thread = Thread.new{ accept_loop(block, main_thread) }
+        reload_thread = Thread.new{ reload_loop(main_thread) }
 
-        Thread.stop
-        @status = :stop
+        # wait that accept_loop or reload_loop end
+        Thread.stop while @status == :run
 
         accept_thread.exit
         @sockets.each(&:close)
@@ -315,8 +315,9 @@ module ParallelServer
       end
 
       # @param block [#call]
+      # @param main_thread [Thread]
       # @return [void]
-      def accept_loop(block)
+      def accept_loop(block, main_thread)
         first = true
         while @status == :run
           wait_thread
@@ -329,6 +330,9 @@ module ParallelServer
             @threads[thr] = addr
           end
         end
+      ensure
+        @status = :stop
+        main_thread.run
       end
 
       # @return [void]
@@ -339,8 +343,9 @@ module ParallelServer
         @status = :exit
       end
 
+      # @param main_thread [Thread]
       # @return [void]
-      def reload_loop
+      def reload_loop(main_thread)
         while true
           data = Conversation.recv(@from_parent)
           break unless data
@@ -351,6 +356,9 @@ module ParallelServer
         end
         @from_parent.close
         @from_parent = nil
+      ensure
+        @status = :stop
+        main_thread.run
       end
 
       # @return [void]
