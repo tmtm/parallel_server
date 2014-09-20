@@ -73,6 +73,19 @@ module ParallelServer
     end
 
     # @return [void]
+    def stop
+      @loop = false
+    end
+
+    # @return [void]
+    def stop!
+      Process.kill 'TERM', *@children rescue nil
+      @loop = false
+    end
+
+    private
+
+    # @return [void]
     def do_reload
       host, port, @opts = @reload_args
       @reload_args = nil
@@ -124,17 +137,6 @@ module ParallelServer
         data = @data_to_child
         Conversation._send(io, data)
       end
-    end
-
-    # @return [void]
-    def stop
-      @loop = false
-    end
-
-    # @return [void]
-    def stop!
-      Process.kill 'TERM', *@children rescue nil
-      @loop = false
     end
 
     # @overload parse_args(host=nil, port, opts={})
@@ -252,8 +254,6 @@ module ParallelServer
       @on_child_start.call(pid) if @on_child_start
     end
 
-    private
-
     def set_variables_from_opts
       @min_processes = @opts[:min_processes] || DEFAULT_MIN_PROCESSES
       @max_processes = @opts[:max_processes] || DEFAULT_MAX_PROCESSES
@@ -313,6 +313,8 @@ module ParallelServer
         wait_all_connections
         reload_thread.exit
       end
+
+      private
 
       # @param block [#call]
       # @param main_thread [Thread]
