@@ -38,7 +38,6 @@ module ParallelServer
       @to_child = {}               # pid => IO
       @child_status = {}           # pid => Hash
       @children = []               # pid
-      @thread_to_child = {}        # pid => Thread
       @loop = true
     end
 
@@ -62,8 +61,6 @@ module ParallelServer
       @sockets.each{|s| s.close rescue nil} if @sockets
       @to_child.values.each{|s| s.close rescue nil}
       @to_child.clear
-      @thread_to_child.values.each(&:exit)
-      @thread_to_child.clear
       Timeout.timeout(1){wait_all_children} rescue Thread.new{wait_all_children}
     end
 
@@ -120,24 +117,24 @@ module ParallelServer
     # @param data [String]
     # @return [void]
     def talk_to_children(data)
-      @data_to_child = Marshal.dump(data)
-      @thread_to_child.values.each do |thr|
-        begin
-          thr.run
-        rescue ThreadError
-          # try to run dead thread. ignore it.
-        end
+      data_to_child = Marshal.dump(data)
+      each_nonblock(@to_child.values, 1) do |io|
+        Conversation._send(io, data_to_child) rescue nil
       end
     end
 
-    # @param io [IO]
-    # @return [void]
-    def talk_to_child_loop(io)
-      data = nil
-      while true
-        Thread.stop if data.nil? || data == @data_to_child
-        data = @data_to_child
-        Conversation._send(io, data)
+    # @param values [Array]
+    # @param timeout [Numeric]
+    def each_nonblock(values, timeout)
+      q = Queue.new
+      values.each{|io| q.push io}
+      until q.empty?
+        Thread.new do
+          until q.empty?
+            value = q.pop(true) rescue break
+            yield value
+          end
+        end.join(timeout)
       end
     end
 
@@ -172,15 +169,11 @@ module ParallelServer
             if st[:status] == :stop
               @to_child[pid].close rescue nil
               @to_child.delete pid
-              @thread_to_child[pid].exit rescue nil
-              @thread_to_child.delete pid
             end
           else
             @from_child.delete from_child
             @to_child[pid].close rescue nil
             @to_child.delete pid
-            @thread_to_child[pid].exit rescue nil
-            @thread_to_child.delete pid
             @child_status.delete pid
             from_child.close
           end
@@ -250,7 +243,6 @@ module ParallelServer
       to_child[0].close
       @from_child[from_child[0]] = pid
       @to_child[pid] = to_child[1]
-      @thread_to_child[pid] = Thread.new(to_child[1]){|io| talk_to_child_loop(io)}
       @children.push pid
       @child_status[pid] = {status: :run, connections: {}}
       @on_child_start.call(pid) if @on_child_start
