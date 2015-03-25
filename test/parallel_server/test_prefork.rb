@@ -48,6 +48,10 @@ class TestParallelServerPrefork < Test::Unit::TestCase
     s
   end
 
+  def opts
+    {}
+  end
+
   sub_test_case 'max_process: 1, max_threads: 1' do
     def opts
       {
@@ -302,6 +306,31 @@ class TestParallelServerPrefork < Test::Unit::TestCase
       sleep 0.5
       assert_equal [pid], @childs
       assert_equal 0, @st.exitstatus
+    end
+  end
+
+  sub_test_case 'each_nonblock' do
+    test 'run in single thread unless timeout occur' do
+      @prefork.singleton_class.class_eval{public :each_nonblock}
+      values = Array.new(100, true)
+      result = []
+      @prefork.each_nonblock(values, 1) do |x|
+        result.push Thread.current
+      end
+      assert_equal result.size, values.size
+      assert_equal result.uniq.size, 1
+    end
+
+    test 'run in multiple thread if timeout occur' do
+      @prefork.singleton_class.class_eval{public :each_nonblock}
+      values = Array.new(10, true)
+      result = []
+      @prefork.each_nonblock(values, 0.1) do |x|
+        result.push Thread.current
+        sleep 0.3
+      end
+      assert_equal result.size, values.size
+      assert result.uniq.size == 10
     end
   end
 end
