@@ -334,7 +334,7 @@ module ParallelServer
             @threads[thr] = addr
           end
           count += 1
-          break if count >= max_use
+          break if max_use > 0 && count >= max_use
         end
       ensure
         @status = :stop
@@ -424,7 +424,8 @@ module ParallelServer
       # @return [nil]
       def accept
         while true
-          readable, = IO.select(@sockets, nil, nil, max_idle)
+          timeout = max_idle > 0 ? max_idle : nil
+          readable, = IO.select(@sockets, nil, nil, timeout)
           return nil unless readable
           r, = readable
           begin
