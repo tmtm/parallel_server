@@ -293,7 +293,7 @@ class TestParallelServerPrefork < Test::Unit::TestCase
       {
         min_processes: 1,
         max_processes: 1,
-        max_idle: 0,
+        max_idle: 0.001,
         on_child_exit: ->(pid, st){ @childs.push pid; @st = st },
       }
     end
