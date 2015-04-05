@@ -34,9 +34,9 @@ module ParallelServer
       host, port, opts = parse_args(*args)
       @host, @port, @opts = host, port, opts
       set_variables_from_opts
-      @from_child = {}             # IO => pid
-      @to_child = {}               # pid => IO
-      @child_status = {}           # pid => Hash
+      @from_child = {}             # IO(r) => pid
+      @to_child = {}               # IO(r) => IO(w)
+      @child_status = {}           # IO(r) => Hash
       @children = []               # pid
       @loop = true
     end
@@ -167,18 +167,17 @@ module ParallelServer
       readable, = IO.select(rset, nil, nil, 0.1)
       if readable
         readable.each do |from_child|
-          pid = @from_child[from_child]
           if st = Conversation.recv(from_child)
-            @child_status[pid].update st
+            @child_status[from_child].update st
             if st[:status] == :stop
-              @to_child[pid].close rescue nil
-              @to_child.delete pid
+              @to_child[from_child].close rescue nil
+              @to_child.delete from_child
             end
           else
             @from_child.delete from_child
-            @to_child[pid].close rescue nil
-            @to_child.delete pid
-            @child_status.delete pid
+            @to_child[from_child].close rescue nil
+            @to_child.delete from_child
+            @child_status.delete from_child
             from_child.close
           end
         end
@@ -245,10 +244,11 @@ module ParallelServer
       end
       from_child[1].close
       to_child[0].close
-      @from_child[from_child[0]] = pid
-      @to_child[pid] = to_child[1]
+      r, w = from_child[0], to_child[1]
+      @from_child[r] = pid
+      @to_child[r] = w
+      @child_status[r] = {status: :run, connections: {}}
       @children.push pid
-      @child_status[pid] = {status: :run, connections: {}}
       @on_child_start.call(pid) if @on_child_start
     end
 
