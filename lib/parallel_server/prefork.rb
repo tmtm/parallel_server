@@ -241,6 +241,7 @@ module ParallelServer
         to_child[1].close
         @on_start.call if @on_start
         Child.new(@sockets, @opts, from_child[1], to_child[0]).start(@block)
+        exit! true
       end
       from_child[1].close
       to_child[0].close
