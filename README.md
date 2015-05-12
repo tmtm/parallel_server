@@ -25,6 +25,8 @@ end
 
 * `ParallelServer::Prefork.new(port, opts={})`
 * `ParallelServer::Prefork.new(host, port, opts={})`
+* `ParallelServer::Prefork.new(socket, opts={})`
+* `ParallelServer::Prefork.new([socket, ...], opts={})`
 
 #### host
 
@@ -32,6 +34,9 @@ end
 
 #### port
 待ち受けるTCPポート番号。
+
+### socket
+待ち受ける Socket オブジェクト。
 
 #### opts
 

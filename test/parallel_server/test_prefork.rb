@@ -9,7 +9,7 @@ require 'parallel_server/prefork'
 class TestParallelServerPrefork < Test::Unit::TestCase
   def setup
     @tmpf = Tempfile.new('test_prefork')
-    @prefork = ParallelServer::Prefork.new(port, opts)
+    @prefork = ParallelServer::Prefork.new(*args, opts)
     @thr = Thread.new do
       begin
         @prefork.start do |sock|
@@ -35,6 +35,10 @@ class TestParallelServerPrefork < Test::Unit::TestCase
     @prefork.stop!
     @thr.join rescue nil
     @tmpf.close true
+  end
+
+  def args
+    [port]
   end
 
   def port
@@ -331,6 +335,58 @@ class TestParallelServerPrefork < Test::Unit::TestCase
       end
       assert_equal result.size, values.size
       assert result.uniq.size == 10
+    end
+  end
+
+  sub_test_case 'new(port)' do
+    def args
+      [port]
+    end
+
+    test 'connection' do
+      Timeout.timeout(1){ connect }
+    end
+  end
+
+  sub_test_case 'new(host, port)' do
+    def args
+      ['localhost', port]
+    end
+
+    test 'connection' do
+      Timeout.timeout(1){ connect }
+    end
+  end
+
+  sub_test_case 'new(socket)' do
+    def args
+      @sock = TCPServer.new(port)
+      [@sock]
+    end
+
+    def teardown
+      @sock.close
+      super
+    end
+
+    test 'connection' do
+      Timeout.timeout(1){ connect }
+    end
+  end
+
+  sub_test_case 'new(sockets)' do
+    def args
+      @socks = [TCPServer.new(port), TCPServer.new(port+1)]
+      [@socks]
+    end
+
+    def teardown
+      @socks.each(&:close)
+      super
+    end
+
+    test 'connection' do
+      Timeout.timeout(1){ connect }
     end
   end
 end

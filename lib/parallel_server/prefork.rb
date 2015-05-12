@@ -13,8 +13,6 @@ module ParallelServer
     attr_reader :child_status
 
     # @!macro [new] args
-    #   @param host [String] hostname or IP address
-    #   @param port [Integer / String] port number / service name
     #   @param opts [Hash] options
     #   @option opts [Integer] :min_processes (5) minimum processes
     #   @option opts [Integer] :max_processes (20) maximum processes
@@ -29,16 +27,24 @@ module ParallelServer
     #   @option opts [#call] :on_child_exit (nil) object#call(pid, status) is invoked when child process exit. This is call in parent process.
 
     # @overload initialize(host=nil, port, opts={})
-    #   @!macro args
+    #   @param host [String] hostname or IP address
+    #   @param port [Integer / String] port number / service name
+    #   @macro args
+    # @overload initialize(socket, opts={})
+    #   @param socket [Socket] listening socket
+    #   @macro args
+    # @overload initialize(sockets, opts={})
+    #   @param sockets [Array<Socket>] listening sockets
+    #   @macro args
     def initialize(*args)
-      host, port, opts = parse_args(*args)
-      @host, @port, @opts = host, port, opts
+      @sockets, @host, @port, @opts = parse_args(*args)
       set_variables_from_opts
       @from_child = {}             # IO(r) => pid
       @to_child = {}               # IO(r) => IO(w)
       @child_status = {}           # IO(r) => Hash
       @children = []               # pid
       @loop = true
+      @sockets_created = false
     end
 
     # @return [void]
@@ -49,8 +55,11 @@ module ParallelServer
     def start(&block)
       raise 'block required' unless block
       @block = block
-      @sockets = Socket.tcp_server_sockets(@host, @port)
-      @sockets.each{|s| s.listen(@listen_backlog)} if @listen_backlog
+      unless @sockets
+        @sockets = Socket.tcp_server_sockets(@host, @port)
+        @sockets.each{|s| s.listen(@listen_backlog)} if @listen_backlog
+        @sockets_created = true
+      end
       @reload_args = nil
       while @loop
         do_reload if @reload_args
@@ -58,13 +67,21 @@ module ParallelServer
         adjust_children
       end
     ensure
-      @sockets.each{|s| s.close rescue nil} if @sockets
+      @sockets.each{|s| s.close rescue nil} if @sockets && @sockets_created
       @to_child.values.each{|s| s.close rescue nil}
       @to_child.clear
       Timeout.timeout(1){wait_all_children} rescue Thread.new{wait_all_children}
     end
 
     # @overload reload(host=nil, port, opts={})
+    #   @param host [String] hostname or IP address
+    #   @param port [Integer / String] port number / service name
+    #   @macro args
+    # @overload reload(socket, opts={})
+    #   @param socket [Socket] listening socket
+    #   @macro args
+    # @overload reload(sockets, opts={})
+    #   @param sockets [Array<Socket>] listening sockets
     #   @macro args
     # @return [void]
     def reload(*args)
@@ -86,20 +103,25 @@ module ParallelServer
 
     # @return [void]
     def do_reload
-      host, port, @opts = @reload_args
+      sockets, host, port, @opts = @reload_args
       @reload_args = nil
       old_listen_backlog = @listen_backlog
       set_variables_from_opts
 
       address_changed = false
       if @host != host || @port != port
-        @host, @port = host, port
-        @sockets.each(&:close)
-        @sockets = Socket.tcp_server_sockets(@host, @port)
-        @sockets.each{|s| s.listen(@listen_backlog)} if @listen_backlog
+        @sockets.each(&:close) if @sockets_created
+        @sockets, @host, @port = sockets, host, port
+        if @sockets
+          @sockets_created = false
+        else
+          @sockets = Socket.tcp_server_sockets(@host, @port)
+          @sockets.each{|s| s.listen(@listen_backlog)} if @listen_backlog
+          @sockets_created = true
+        end
         address_changed = true
       elsif @listen_backlog != old_listen_backlog
-        @sockets.each{|s| s.listen(@listen_backlog)} if @listen_backlog
+        @sockets.each{|s| s.listen(@listen_backlog)} if @listen_backlog && @sockets_created
       end
 
       reload_children(address_changed)
@@ -143,8 +165,17 @@ module ParallelServer
     end
 
     # @overload parse_args(host=nil, port, opts={})
+    #   @param host [String] hostname or IP address
+    #   @param port [Integer / String] port number / service name
     #   @macro args
-    # @return [Array<String, String, Hash>] hostname, port, option
+    # @overload parse_args(socket, opts={})
+    #   @param socket [Socket] listening socket
+    #   @macro args
+    # @overload parse_args(sockets, opts={})
+    #   @param sockets [Array<Socket>] listening sockets
+    #   @macro args
+    # @return [Array<Array<Socket>, String, String, Hash>] sockets, hostname, port, option.
+    #   either sockets or (hostname & port) is available.
     def parse_args(*args)
       opts = {}
       arg_count = args.size
@@ -152,13 +183,18 @@ module ParallelServer
         opts = args.pop
       end
       if args.size == 1
-        host, port = nil, args.first
+        case args.first
+        when Integer, String
+          host, port = nil, args.first
+        else
+          sockets = [args.first].flatten
+        end
       elsif args.size == 2
         host, port = args
       else
         raise ArgumentError, "wrong number of arguments (#{arg_count} for 1..3)"
       end
-      return host, port, opts
+      return sockets, host, port, opts
     end
 
     # @return [Integer]
