@@ -110,7 +110,7 @@ module ParallelServer
 
       address_changed = false
       if @host != host || @port != port
-        @sockets.each(&:close) if @sockets_created
+        @sockets.each{|s| s.close rescue nil} if @sockets_created
         @sockets, @host, @port = sockets, host, port
         if @sockets
           @sockets_created = false
@@ -271,8 +271,8 @@ module ParallelServer
       from_child = IO.pipe
       to_child = IO.pipe
       pid = fork do
-        @from_child.keys.each(&:close)
-        @to_child.values.each(&:close)
+        @from_child.keys.each{|p| p.close rescue nil}
+        @to_child.values.each{|p| p.close rescue nil}
         from_child[0].close
         to_child[1].close
         @on_start.call if @on_start
@@ -346,7 +346,7 @@ module ParallelServer
         queue.pop
 
         accept_thread.exit
-        @sockets.each(&:close)
+        @sockets.each{|s| s.close rescue nil}
         @threads_mutex.synchronize do
           notify_status
         end
