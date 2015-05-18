@@ -392,9 +392,9 @@ module ParallelServer
         while true
           data = Conversation.recv(@from_parent)
           break unless data
+          break if data[:address_changed]
           @options.update data[:options]
           @options[:on_reload].call @options if @options[:on_reload]
-          @status = :stop if data[:address_changed]
           @threads_cv.signal
         end
         @from_parent.close
