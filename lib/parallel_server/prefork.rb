@@ -109,7 +109,7 @@ module ParallelServer
       set_variables_from_opts
 
       address_changed = false
-      if @host != host || @port != port
+      if @sockets_created ? (@host != host || @port != port) : @sockets != sockets
         @sockets.each{|s| s.close rescue nil} if @sockets_created
         @sockets, @host, @port = sockets, host, port
         if @sockets
