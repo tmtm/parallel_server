@@ -373,6 +373,9 @@ module ParallelServer
           count += 1
           break if max_use > 0 && count >= max_use
         end
+      rescue => e
+        STDERR.puts e.inspect, e.backtrace.inspect
+        raise e
       ensure
         @status = :stop
         queue.push true
@@ -399,6 +402,9 @@ module ParallelServer
         end
         @from_parent.close
         @from_parent = nil
+      rescue => e
+        STDERR.puts e.inspect, e.backtrace.inspect
+        raise e
       ensure
         @status = :stop
         queue.push true
