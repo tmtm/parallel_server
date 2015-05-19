@@ -56,8 +56,7 @@ module ParallelServer
       raise 'block required' unless block
       @block = block
       unless @sockets
-        @sockets = Socket.tcp_server_sockets(@host, @port)
-        @sockets.each{|s| s.listen(@listen_backlog)} if @listen_backlog
+        @sockets = create_server_socket(@host, @port, @listen_backlog)
         @sockets_created = true
       end
       @reload_args = nil
@@ -124,8 +123,7 @@ module ParallelServer
         if @sockets
           @sockets_created = false
         else
-          @sockets = Socket.tcp_server_sockets(@host, @port)
-          @sockets.each{|s| s.listen(@listen_backlog)} if @listen_backlog
+          @sockets = create_server_socket(@host, @port, @listen_backlog)
           @sockets_created = true
         end
       elsif @listen_backlog != old_listen_backlog
@@ -133,6 +131,23 @@ module ParallelServer
       end
 
       reload_children
+    end
+
+    # @param host [String] hostname or IP address
+    # @param port [Integer / String] port number / service name
+    # @param backlog [Integer / nil] listen backlog
+    # @return [Array<Socket>] listening sockets
+    def create_server_socket(host, port, backlog)
+      t = Time.now + 5
+      begin
+        sockets = Socket.tcp_server_sockets(host, port)
+      rescue Errno::EADDRINUSE
+        raise if Time.now > t
+        sleep 0.1
+        retry
+      end
+      sockets.each{|s| s.listen(backlog)} if backlog
+      sockets
     end
 
     # @return [void]
