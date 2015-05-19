@@ -99,6 +99,15 @@ module ParallelServer
       @loop = false
     end
 
+    # @return [void]
+    def detach_children
+      t = Time.now + 5
+      talk_to_children(detach: true)
+      while Time.now < t && @child_status.values.any?{|s| s[:status] == :run}
+        watch_children
+      end
+    end
+
     private
 
     # @return [void]
@@ -108,9 +117,9 @@ module ParallelServer
       old_listen_backlog = @listen_backlog
       set_variables_from_opts
 
-      address_changed = false
       if @sockets_created ? (@host != host || @port != port) : @sockets != sockets
         @sockets.each{|s| s.close rescue nil} if @sockets_created
+        detach_children
         @sockets, @host, @port = sockets, host, port
         if @sockets
           @sockets_created = false
@@ -119,19 +128,16 @@ module ParallelServer
           @sockets.each{|s| s.listen(@listen_backlog)} if @listen_backlog
           @sockets_created = true
         end
-        address_changed = true
       elsif @listen_backlog != old_listen_backlog
         @sockets.each{|s| s.listen(@listen_backlog)} if @listen_backlog && @sockets_created
       end
 
-      reload_children(address_changed)
+      reload_children
     end
 
-    # @param address_changed [true/false]
     # @return [void]
-    def reload_children(address_changed=false)
+    def reload_children
       data = {}
-      data[:address_changed] = address_changed
       data[:options] = @opts.select{|_, value| Marshal.dump(value) rescue nil}
       talk_to_children data
     end
@@ -395,8 +401,8 @@ module ParallelServer
         while true
           data = Conversation.recv(@from_parent)
           break unless data
-          break if data[:address_changed]
-          @options.update data[:options]
+          break if data[:detach]
+          @options.update data[:options] if data[:options]
           @options[:on_reload].call @options if @options[:on_reload]
           @threads_cv.signal
         end
