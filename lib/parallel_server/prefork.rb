@@ -9,6 +9,8 @@ module ParallelServer
     DEFAULT_STANDBY_THREADS = 5
     DEFAULT_MAX_IDLE = 10
     DEFAULT_MAX_USE = 1000
+    DEFAULT_WATCHDOG_TIMER = 600
+    DEFAULT_WATCHDOG_SIGNAL = 'TERM'
 
     attr_reader :child_status
 
@@ -21,6 +23,8 @@ module ParallelServer
     #   @option opts [Integer] :max_threads (1) maximum threads per process
     #   @option opts [Integer] :standby_threads (5) keep free processes or threads
     #   @option opts [Integer] :listen_backlog (nil) listen backlog
+    #   @option opts [Integer] :watchdog_timer (600) watchdog timer
+    #   @option opts [Integer] :watchdog_signal ('TERM') this signal is sent when watchdog timer expired.
     #   @option opts [#call] :on_start (nil) object#call() is invoked when child process start. This is called in child process.
     #   @option opts [#call] :on_reload (nil) object#call(hash) is invoked when reload. This is called in child process.
     #   @option opts [#call] :on_child_start (nil) object#call(pid) is invoked when child process exit. This is call in parent process.
@@ -225,6 +229,7 @@ module ParallelServer
       if readable
         readable.each do |from_child|
           if st = Conversation.recv(from_child)
+            st[:time] = Time.now
             @child_status[from_child].update st
             if st[:status] == :stop
               @to_child[from_child].close rescue nil
@@ -239,6 +244,7 @@ module ParallelServer
           end
         end
       end
+      kill_frozen_children
       if @children.size != @child_status.size
         wait_children
       end
@@ -269,6 +275,19 @@ module ParallelServer
     # @return [Integer]
     def available_children
       @child_status.values.count{|st| st[:status] == :run}
+    end
+
+    # @return [void]
+    def kill_frozen_children
+      now = Time.now
+      @child_status.each do |r, st|
+        if now > st[:time] + @watchdog_timer + 60
+          Process.kill 'KILL', @from_child[r]
+        elsif now > st[:time] + @watchdog_timer && ! st[:signal_sent]
+          Process.kill @watchdog_signal, @from_child[r]
+          st[:signal_sent] = true
+        end
+      end
     end
 
     # @return [void]
@@ -305,7 +324,7 @@ module ParallelServer
       r, w = from_child[0], to_child[1]
       @from_child[r] = pid
       @to_child[r] = w
-      @child_status[r] = {status: :run, connections: {}}
+      @child_status[r] = {status: :run, connections: {}, time: Time.now}
       @children.push pid
       @on_child_start.call(pid) if @on_child_start
     end
@@ -316,6 +335,8 @@ module ParallelServer
       @max_threads = @opts[:max_threads] || DEFAULT_MAX_THREADS
       @standby_threads = @opts[:standby_threads] || DEFAULT_STANDBY_THREADS
       @listen_backlog = @opts[:listen_backlog]
+      @watchdog_timer = @opts[:watchdog_timer] || DEFAULT_WATCHDOG_TIMER
+      @watchdog_signal = @opts[:watchdog_signal] || DEFAULT_WATCHDOG_SIGNAL
       @on_start = @opts[:on_start]
       @on_child_start = @opts[:on_child_start]
       @on_child_exit = @opts[:on_child_exit]
@@ -413,13 +434,23 @@ module ParallelServer
       # @param queue [Queue]
       # @return [void]
       def reload_loop(queue)
+        heartbeat_interval = 5
         while true
-          data = Conversation.recv(@from_parent)
-          break unless data
-          break if data[:detach]
-          @options.update data[:options] if data[:options]
-          @options[:on_reload].call @options if @options[:on_reload]
-          @threads_cv.signal
+          time = Time.now
+          if IO.select([@from_parent], nil, nil, heartbeat_interval)
+            heartbeat_interval -= Time.now - time
+            heartbeat_interval = 0 if heartbeat_interval < 0
+            data = Conversation.recv(@from_parent)
+            break if data.nil? or data[:detach]
+            @options.update data[:options] if data[:options]
+            @options[:on_reload].call @options if @options[:on_reload]
+            @threads_cv.signal
+          else
+            heartbeat_interval = 5
+            @threads_mutex.synchronize do
+              Conversation.send(@to_parent, {})
+            end
+          end
         end
         @from_parent.close
         @from_parent = nil
