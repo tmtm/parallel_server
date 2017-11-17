@@ -465,7 +465,9 @@ module ParallelServer
       # @return [void]
       def wait_thread
         @threads_mutex.synchronize do
-          while @threads.size >= max_threads
+          while true
+            @threads.select!{|thr,| thr.alive?}
+            break if @threads.size < max_threads
             @threads_cv.wait(@threads_mutex)
           end
         end
