@@ -282,9 +282,9 @@ module ParallelServer
       now = Time.now
       @child_status.each do |r, st|
         if now > st[:time] + @watchdog_timer + 60
-          Process.kill 'KILL', @from_child[r]
+          Process.kill 'KILL', @from_child[r] rescue nil
         elsif now > st[:time] + @watchdog_timer && ! st[:signal_sent]
-          Process.kill @watchdog_signal, @from_child[r]
+          Process.kill @watchdog_signal, @from_child[r] rescue nil
           st[:signal_sent] = true
         end
       end
