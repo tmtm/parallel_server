@@ -18,7 +18,7 @@ module ParallelServer
     #   @param opts [Hash] options
     #   @option opts [Integer] :min_processes (5) minimum processes
     #   @option opts [Integer] :max_processes (20) maximum processes
-    #   @option opts [Integer] :max_idle (10) cihld process exits if max_idle seconds is expired
+    #   @option opts [Integer] :max_idle (10) child process exits if max_idle seconds is expired
     #   @option opts [Integer] :max_use (1000) child process exits if it is connected max_use times.
     #   @option opts [Integer] :max_threads (1) maximum threads per process
     #   @option opts [Integer] :standby_threads (5) keep free processes or threads
