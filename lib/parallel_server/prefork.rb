@@ -358,7 +358,6 @@ module ParallelServer
         @threads = {}
         @threads_mutex = Mutex.new
         @threads_cv = ConditionVariable.new
-        @parent_mutex = Mutex.new
         @status = :run
       end
 
