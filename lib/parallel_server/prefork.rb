@@ -231,10 +231,6 @@ module ParallelServer
           if st = Conversation.recv(from_child)
             st[:time] = Time.now
             @child_status[from_child].update st
-            if st[:status] == :stop
-              @to_child[from_child].close rescue nil
-              @to_child.delete from_child
-            end
           else
             @from_child.delete from_child
             @to_child[from_child].close rescue nil
