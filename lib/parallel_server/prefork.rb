@@ -1,5 +1,6 @@
 require 'socket'
 require 'thread'
+require 'timeout'
 
 module ParallelServer
   class Prefork
